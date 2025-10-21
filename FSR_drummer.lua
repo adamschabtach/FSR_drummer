@@ -1,11 +1,12 @@
 -- HTTPS://NOR.THE-RN.INFO
 -- FSR_drummer
 -- >> k1: exit
--- >> k2:
--- >> k3:
+-- >> k2: hold for feedback tap mode
+-- >> k3: start/stop sequencer
 -- >> e1:
 -- >> e2:
 -- >> e3:
+-- >> grid: press to toggle bits (or feedback taps when k2 held)
 
 -- Constants
 NUM_ROWS = 4      -- four instruments/shift registers
@@ -20,6 +21,11 @@ tempo = 120  -- BPM
 step_division = 1/4  -- 16th notes (1/4 of a beat)
 sequencer_clock_id = nil
 running = false
+
+-- Grid
+g = grid.connect()
+grid_dirty = true
+feedback_mode = false  -- true when holding key for feedback tap editing
 
 function init() ------------------------------ init() is automatically called by norns
   -- Initialize shift registers
@@ -38,6 +44,10 @@ function init() ------------------------------ init() is automatically called by
 
   -- Start the sequencer clock
   start_sequencer()
+
+  -- Set up grid callbacks
+  g.key = grid_key
+  grid_redraw()
 end
 
 function sequencer_clock()
@@ -97,12 +107,56 @@ function step_sequencer()
     end
   end
   screen_dirty = true  -- update display after step
+  grid_dirty = true    -- update grid after step
 end
 
 function send_trigger(instrument)
   -- Placeholder for MIDI/crow trigger output
   -- TODO: implement MIDI and crow output
   print("Trigger instrument " .. instrument)
+end
+
+-- Grid functions
+function grid_key(x, y, z)
+  if z == 1 then  -- key pressed
+    -- Ensure we're within bounds (4 rows, 16 columns)
+    if y >= 1 and y <= NUM_ROWS and x >= 1 and x <= REGISTER_LENGTH then
+      if feedback_mode then
+        -- Toggle feedback tap
+        feedback_taps[y][x] = not feedback_taps[y][x]
+      else
+        -- Toggle bit state
+        shift_registers[y][x] = shift_registers[y][x] == 1 and 0 or 1
+      end
+      grid_dirty = true
+      screen_dirty = true
+    end
+  end
+end
+
+function grid_redraw()
+  g:all(0)  -- clear grid
+
+  for row = 1, NUM_ROWS do
+    for col = 1, REGISTER_LENGTH do
+      local brightness = 0
+
+      if shift_registers[row][col] == 1 then
+        if feedback_taps[row][col] then
+          brightness = 8  -- dimmer for feedback tap that's high
+        else
+          brightness = 15 -- bright for regular high bit
+        end
+      elseif feedback_taps[row][col] then
+        brightness = 4    -- dim for feedback tap that's low
+      end
+
+      g:led(col, row, brightness)
+    end
+  end
+
+  g:refresh()
+  grid_dirty = false
 end
 
 function enc(e, d) --------------- enc() is automatically called by norns
@@ -117,14 +171,18 @@ function turn(e, d) ----------------------------- an encoder has turned
 end
 
 function key(k, z) ------------------ key() is automatically called by norns
-  if z == 0 then return end --------- do nothing when you release a key
-  if k == 2 then press_down(2) end -- but press_down(2)
-  if k == 3 then press_down(3) end -- and press_down(3)
-  screen_dirty = true --------------- something changed
-end
+  if k == 1 then return end --------- k1 is reserved for exit
 
-function press_down(i) ---------- a key has been pressed
-  message = "press down " .. i -- build a message
+  if k == 2 then
+    feedback_mode = (z == 1)  -- hold k2 to enter feedback tap mode
+    screen_dirty = true
+    grid_dirty = true
+  end
+
+  if k == 3 and z == 1 then
+    running = not running  -- k3 to toggle start/stop
+    screen_dirty = true
+  end
 end
 
 function redraw_clock() ----- a clock that draws space
@@ -133,6 +191,9 @@ function redraw_clock() ----- a clock that draws space
     if screen_dirty then ---- only if something changed
       redraw() -------------- redraw space
       screen_dirty = false -- and everything is clean again
+    end
+    if grid_dirty then ------ only if grid changed
+      grid_redraw() --------- redraw grid
     end
   end
 end
@@ -149,8 +210,18 @@ function redraw() -------------- redraw() is automatically called by norns
   screen.text("FSR_drummer")
 
   -- Draw tempo and status
-  screen.move(100, 8)
+  screen.move(80, 8)
   screen.text(tempo .. " BPM")
+
+  -- Draw mode and status indicators
+  screen.move(2, 62)
+  if feedback_mode then
+    screen.level(15)
+    screen.text("FEEDBACK MODE")
+  else
+    screen.level(8)
+    screen.text(running and "RUNNING" or "STOPPED")
+  end
 
   -- Display shift registers
   local cell_width = 7
