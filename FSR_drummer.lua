@@ -26,9 +26,6 @@ running = false
 g = grid.connect()
 grid_dirty = true
 
--- Crow trigger settings
-trigger_duration = 0.05  -- 50ms trigger pulse
-
 -- MIDI settings
 midi_device = nil
 midi_channel = 1
@@ -42,6 +39,54 @@ midi_notes = {
 }
 
 function init() ------------------------------ init() is automatically called by norns
+  -- Initialize parameters
+  params:add_separator("FSR_drummer")
+
+  -- Add crow output parameters for each instrument
+  for i = 1, NUM_ROWS do
+    params:add_separator("Instrument " .. i)
+
+    params:add{
+      type = "number",
+      id = "crow_voltage_" .. i,
+      name = "Crow " .. i .. " Voltage",
+      min = 0,
+      max = 10,
+      default = 5,
+      formatter = function(param) return param:get() .. "V" end,
+      action = function() init_crow_outputs() end
+    }
+
+    params:add{
+      type = "control",
+      id = "crow_duration_" .. i,
+      name = "Crow " .. i .. " Duration",
+      controlspec = controlspec.new(0.01, 1.0, "lin", 0.01, 0.05, "s"),
+      formatter = function(param) return string.format("%.2fs", param:get()) end,
+      action = function() init_crow_outputs() end
+    }
+
+    params:add{
+      type = "number",
+      id = "midi_note_" .. i,
+      name = "MIDI Note " .. i,
+      min = 0,
+      max = 127,
+      default = midi_notes[i],
+      formatter = function(param) return param:get() end
+    }
+  end
+
+  params:add_separator("MIDI")
+
+  params:add{
+    type = "control",
+    id = "midi_duration",
+    name = "MIDI Duration",
+    controlspec = controlspec.new(0.01, 1.0, "lin", 0.01, 0.05, "s"),
+    formatter = function(param) return string.format("%.2fs", param:get()) end
+  }
+
   -- Initialize shift registers
   for i = 1, NUM_ROWS do
     shift_registers[i] = {}
@@ -64,13 +109,18 @@ function init() ------------------------------ init() is automatically called by
   grid_redraw()
 
   -- Initialize crow outputs (outputs 1-4 for instruments 1-4)
-  crow.output[1].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
-  crow.output[2].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
-  crow.output[3].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
-  crow.output[4].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
+  init_crow_outputs()
 
   -- Connect to MIDI device
   midi_device = midi.connect(1)  -- Connect to first MIDI device
+end
+
+function init_crow_outputs()
+  for i = 1, 4 do
+    local voltage = params:get("crow_voltage_" .. i)
+    local duration = params:get("crow_duration_" .. i)
+    crow.output[i].action = "{to(" .. voltage .. ",0), to(0," .. duration .. ")}"
+  end
 end
 
 function sequencer_clock()
@@ -139,11 +189,13 @@ function send_trigger(instrument)
 
   -- Send MIDI note
   if midi_device then
-    midi_device:note_on(midi_notes[instrument], midi_velocity, midi_channel)
-    -- Schedule note off after a short duration
+    local midi_note = params:get("midi_note_" .. instrument)
+    local midi_duration = params:get("midi_duration")
+    midi_device:note_on(midi_note, midi_velocity, midi_channel)
+    -- Schedule note off after the configured duration
     clock.run(function()
-      clock.sleep(0.05)  -- 50ms note duration
-      midi_device:note_off(midi_notes[instrument], 0, midi_channel)
+      clock.sleep(midi_duration)
+      midi_device:note_off(midi_note, 0, midi_channel)
     end)
   end
 
