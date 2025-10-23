@@ -4,7 +4,7 @@
 -- >> k2:
 -- >> k3: start/stop sequencer
 -- >> e1:
--- >> e2:
+-- >> e2: tempo (20-300 BPM)
 -- >> e3:
 -- >> grid: rows 1,3,5,7 = bit states; rows 2,4,6,8 = feedback taps
 
@@ -252,14 +252,12 @@ function grid_redraw()
 end
 
 function enc(e, d) --------------- enc() is automatically called by norns
-  if e == 1 then turn(e, d) end -- turn encoder 1
-  if e == 2 then turn(e, d) end -- turn encoder 2
-  if e == 3 then turn(e, d) end -- turn encoder 3
-  screen_dirty = true ------------ something changed
-end
-
-function turn(e, d) ----------------------------- an encoder has turned
-  message = "encoder " .. e .. ", delta " .. d -- build a message
+  if e == 2 then
+    -- Encoder 2 controls tempo
+    tempo = util.clamp(tempo + d, 20, 300)
+    clock.tempo = tempo / 60  -- update clock tempo
+    screen_dirty = true
+  end
 end
 
 function key(k, z) ------------------ key() is automatically called by norns
