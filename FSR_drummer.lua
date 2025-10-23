@@ -1,12 +1,12 @@
 -- HTTPS://NOR.THE-RN.INFO
 -- FSR_drummer
 -- >> k1: exit
--- >> k2: hold for feedback tap mode
+-- >> k2:
 -- >> k3: start/stop sequencer
 -- >> e1:
 -- >> e2:
 -- >> e3:
--- >> grid: press to toggle bits (or feedback taps when k2 held)
+-- >> grid: rows 1,3,5,7 = bit states; rows 2,4,6,8 = feedback taps
 
 -- Constants
 NUM_ROWS = 4      -- four instruments/shift registers
@@ -25,7 +25,21 @@ running = false
 -- Grid
 g = grid.connect()
 grid_dirty = true
-feedback_mode = false  -- true when holding key for feedback tap editing
+
+-- Crow trigger settings
+trigger_duration = 0.05  -- 50ms trigger pulse
+
+-- MIDI settings
+midi_device = nil
+midi_channel = 1
+midi_velocity = 100
+-- MIDI note numbers for each instrument (standard GM drum mapping)
+midi_notes = {
+  36,  -- Instrument 1: Kick (C1)
+  38,  -- Instrument 2: Snare (D1)
+  42,  -- Instrument 3: Closed Hi-Hat (F#1)
+  49   -- Instrument 4: Crash Cymbal (C#2)
+}
 
 function init() ------------------------------ init() is automatically called by norns
   -- Initialize shift registers
@@ -48,6 +62,15 @@ function init() ------------------------------ init() is automatically called by
   -- Set up grid callbacks
   g.key = grid_key
   grid_redraw()
+
+  -- Initialize crow outputs (outputs 1-4 for instruments 1-4)
+  crow.output[1].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
+  crow.output[2].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
+  crow.output[3].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
+  crow.output[4].action = "{to(5,0), to(0," .. trigger_duration .. ")}"
+
+  -- Connect to MIDI device
+  midi_device = midi.connect(1)  -- Connect to first MIDI device
 end
 
 function sequencer_clock()
@@ -111,25 +134,45 @@ function step_sequencer()
 end
 
 function send_trigger(instrument)
-  -- Placeholder for MIDI/crow trigger output
-  -- TODO: implement MIDI and crow output
+  -- Send trigger via crow output
+  crow.output[instrument].execute()
+
+  -- Send MIDI note
+  if midi_device then
+    midi_device:note_on(midi_notes[instrument], midi_velocity, midi_channel)
+    -- Schedule note off after a short duration
+    clock.run(function()
+      clock.sleep(0.05)  -- 50ms note duration
+      midi_device:note_off(midi_notes[instrument], 0, midi_channel)
+    end)
+  end
+
   print("Trigger instrument " .. instrument)
 end
 
 -- Grid functions
 function grid_key(x, y, z)
   if z == 1 then  -- key pressed
-    -- Ensure we're within bounds (4 rows, 16 columns)
-    if y >= 1 and y <= NUM_ROWS and x >= 1 and x <= REGISTER_LENGTH then
-      if feedback_mode then
-        -- Toggle feedback tap
-        feedback_taps[y][x] = not feedback_taps[y][x]
-      else
-        -- Toggle bit state
-        shift_registers[y][x] = shift_registers[y][x] == 1 and 0 or 1
+    -- Ensure we're within column bounds
+    if x >= 1 and x <= REGISTER_LENGTH then
+      -- Calculate which register (row pair) we're in
+      -- y=1,2 -> register 1, y=3,4 -> register 2, etc.
+      local register = math.ceil(y / 2)
+
+      if register >= 1 and register <= NUM_ROWS then
+        local is_feedback_row = (y % 2 == 0)  -- even rows are feedback taps
+
+        if is_feedback_row then
+          -- Toggle feedback tap
+          feedback_taps[register][x] = not feedback_taps[register][x]
+        else
+          -- Toggle bit state
+          shift_registers[register][x] = shift_registers[register][x] == 1 and 0 or 1
+        end
+
+        grid_dirty = true
+        screen_dirty = true
       end
-      grid_dirty = true
-      screen_dirty = true
     end
   end
 end
@@ -137,21 +180,18 @@ end
 function grid_redraw()
   g:all(0)  -- clear grid
 
-  for row = 1, NUM_ROWS do
+  for register = 1, NUM_ROWS do
+    local bit_row = (register * 2) - 1      -- odd rows: 1, 3, 5, 7
+    local feedback_row = register * 2        -- even rows: 2, 4, 6, 8
+
     for col = 1, REGISTER_LENGTH do
-      local brightness = 0
+      -- Draw bit state in odd row
+      local bit_brightness = shift_registers[register][col] == 1 and 15 or 0
+      g:led(col, bit_row, bit_brightness)
 
-      if shift_registers[row][col] == 1 then
-        if feedback_taps[row][col] then
-          brightness = 8  -- dimmer for feedback tap that's high
-        else
-          brightness = 15 -- bright for regular high bit
-        end
-      elseif feedback_taps[row][col] then
-        brightness = 4    -- dim for feedback tap that's low
-      end
-
-      g:led(col, row, brightness)
+      -- Draw feedback tap in even row
+      local feedback_brightness = feedback_taps[register][col] and 8 or 0
+      g:led(col, feedback_row, feedback_brightness)
     end
   end
 
@@ -172,12 +212,6 @@ end
 
 function key(k, z) ------------------ key() is automatically called by norns
   if k == 1 then return end --------- k1 is reserved for exit
-
-  if k == 2 then
-    feedback_mode = (z == 1)  -- hold k2 to enter feedback tap mode
-    screen_dirty = true
-    grid_dirty = true
-  end
 
   if k == 3 and z == 1 then
     running = not running  -- k3 to toggle start/stop
@@ -213,15 +247,10 @@ function redraw() -------------- redraw() is automatically called by norns
   screen.move(80, 8)
   screen.text(tempo .. " BPM")
 
-  -- Draw mode and status indicators
+  -- Draw status indicator
   screen.move(2, 62)
-  if feedback_mode then
-    screen.level(15)
-    screen.text("FEEDBACK MODE")
-  else
-    screen.level(8)
-    screen.text(running and "RUNNING" or "STOPPED")
-  end
+  screen.level(8)
+  screen.text(running and "RUNNING" or "STOPPED")
 
   -- Display shift registers
   local cell_width = 7
@@ -275,5 +304,17 @@ function cleanup() --------------- cleanup() is automatically called on script c
   clock.cancel(redraw_clock_id) -- melt our clock vie the id we noted
   if sequencer_clock_id then
     clock.cancel(sequencer_clock_id) -- stop the sequencer clock
+  end
+
+  -- Reset crow outputs to 0V
+  for i = 1, 4 do
+    crow.output[i].volts = 0
+  end
+
+  -- Send MIDI all notes off
+  if midi_device then
+    for i = 1, NUM_ROWS do
+      midi_device:note_off(midi_notes[i], 0, midi_channel)
+    end
   end
 end
