@@ -157,16 +157,16 @@ function calculate_feedback(row)
 end
 
 function shift_register(row)
-  -- Check if rightmost bit is high (trigger condition)
-  local trigger = shift_registers[row][REGISTER_LENGTH] == 1
+  -- Calculate new input bit from feedback taps
+  shift_registers[row][1] = calculate_feedback(row)
 
-  -- Shift all bits to the right
+  -- Shift all but first bits to the right
   for i = REGISTER_LENGTH, 2, -1 do
     shift_registers[row][i] = shift_registers[row][i - 1]
   end
 
-  -- Calculate new input bit from feedback taps
-  shift_registers[row][1] = calculate_feedback(row)
+  -- Check if rightmost bit is high (trigger condition)
+  local trigger = shift_registers[row][REGISTER_LENGTH] == 1
 
   return trigger
 end
