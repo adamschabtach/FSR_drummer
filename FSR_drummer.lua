@@ -294,21 +294,14 @@ function redraw() -------------- redraw() is automatically called by norns
   screen.font_face(1)
   screen.font_size(8)
   screen.move(2, 8)
-  screen.text("FSR_drummer")
-
-  -- Draw tempo and status
+  screen.text(running and "RUNNING" or "STOPPED")
   screen.move(80, 8)
   screen.text(tempo .. " BPM")
-
-  -- Draw status indicator
-  screen.move(2, 62)
-  screen.level(8)
-  screen.text(running and "RUNNING" or "STOPPED")
 
   -- Display shift registers
   local cell_width = 6
   local cell_height = 6
-  local start_x = 4
+  local start_x = 6
   local start_y = 16
   local row_spacing = 12
 
@@ -317,31 +310,28 @@ function redraw() -------------- redraw() is automatically called by norns
 
     -- Draw row label
     screen.level(8)
-    screen.move(0, y + 7)
+    screen.move(0, y)
     screen.text(row)
 
     -- Draw each bit in the shift register
     for col = 1, REGISTER_LENGTH do
       local x = start_x + (col - 1) * cell_width
-
-        screen.move(x, y) 
-      -- Determine brightness based on bit state and feedback tap
+      screen.move(x, y) 
       if shift_registers[row][col] == 1 then
-          screen.level(15)
-        else
-          screen.level(8)
-        end
-        screen.text
-        screen.rect(x, y, cell_width - 2, cell_height - 2)
-        screen.fill()
-      elseif feedback_taps[row][col] then
-        screen.level(4)    -- very dim for feedback tap that's low
-        screen.rect(x, y, cell_width - 2, cell_height - 2)
-        screen.stroke()
+        screen.text("\u{25CF}")  -- filled circle for bit set
       else
-        screen.level(2)    -- outline for empty cells
-        screen.rect(x, y, cell_width - 2, cell_height - 2)
-        screen.stroke()
+        screen.text("\u{25CB}")  -- empty circle for bit clear
+      end
+    end
+    -- Draw each bit in the feedback register
+    y = y + cell_height
+    for col = 1, REGISTER_LENGTH do
+      local x = start_x + (col - 1) * cell_width
+      screen.move(x, y) 
+      if feedback_taps[row][col] then
+        screen.text("+")
+      else
+        screen.text("-")
       end
     end
   end
