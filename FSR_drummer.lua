@@ -158,12 +158,15 @@ end
 
 function shift_register(row)
   -- Calculate new input bit from feedback taps
-  shift_registers[row][1] = calculate_feedback(row)
+  local feedbackBit = calculate_feedback(row)
 
-  -- Shift all but first bits to the right
+  -- Shift all bits to the right
   for i = REGISTER_LENGTH, 2, -1 do
     shift_registers[row][i] = shift_registers[row][i - 1]
   end
+
+  -- Insert feedback bit at the leftmost position
+  shift_registers[row][1] = feedbackBit
 
   -- Check if rightmost bit is high (trigger condition)
   local trigger = shift_registers[row][REGISTER_LENGTH] == 1
@@ -303,8 +306,8 @@ function redraw() -------------- redraw() is automatically called by norns
   screen.text(running and "RUNNING" or "STOPPED")
 
   -- Display shift registers
-  local cell_width = 7
-  local cell_height = 10
+  local cell_width = 6
+  local cell_height = 6
   local start_x = 4
   local start_y = 16
   local row_spacing = 12
@@ -321,13 +324,14 @@ function redraw() -------------- redraw() is automatically called by norns
     for col = 1, REGISTER_LENGTH do
       local x = start_x + (col - 1) * cell_width
 
+        screen.move(x, y) 
       -- Determine brightness based on bit state and feedback tap
       if shift_registers[row][col] == 1 then
-        if feedback_taps[row][col] then
-          screen.level(8)  -- dimmer for feedback tap that's high
+          screen.level(15)
         else
-          screen.level(15) -- bright for regular high bit
+          screen.level(8)
         end
+        screen.text
         screen.rect(x, y, cell_width - 2, cell_height - 2)
         screen.fill()
       elseif feedback_taps[row][col] then
